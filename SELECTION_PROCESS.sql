@@ -3,8 +3,10 @@ CREATE OR REPLACE PACKAGE SELECTION_PROCESS_PACKAGE AS
 	FUNCTION GetCandidatesData RETURN SYS_REFCURSOR;
 	FUNCTION GetCriteriaData RETURN SYS_REFCURSOR;
 	FUNCTION GetCriteriaConfigurationData(p_id_criterion VARCHAR2) RETURN SYS_REFCURSOR;
-	FUNCTION GetHeadquarterAndCareerData(p_id_headquarter_career NUMBER) RETURN VARCHAR2;
+	FUNCTION GetHeadquarter(p_id_headquarter_career NUMBER) RETURN VARCHAR2;
+	FUNCTION GetCareerData(p_id_headquarter_career NUMBER) RETURN VARCHAR2;
 	FUNCTION GetEducationTypeData(p_id_education NUMBER) RETURN VARCHAR2;
+	FUNCTION GetValueInList(p_id_criterion VARCHAR2) RETURN VARCHAR2;
 	PROCEDURE ExecuteSelectionProcess;
 	
 END SELECTION_PROCESS_PACKAGE;
@@ -16,7 +18,7 @@ CREATE OR REPLACE PACKAGE BODY SELECTION_PROCESS_PACKAGE AS
 		CANDIDATES_CURSOR SYS_REFCURSOR;
 	BEGIN 
 		OPEN CANDIDATES_CURSOR FOR
-		SELECT ID_CANDIDATE, SEX, CITY, ESTATE, AGE, ICFES_GENERAL
+		SELECT ID_CANDIDATE, SEX, CITY, ESTATE, AGE, ICFES_GENERAL, ID_HEADQUARTER_CAREER, ID_EDUCATION 
 		FROM CANDIDATES ;
 		RETURN CANDIDATES_CURSOR;
 	END GetCandidatesData;
@@ -36,28 +38,44 @@ CREATE OR REPLACE PACKAGE BODY SELECTION_PROCESS_PACKAGE AS
 	BEGIN
 		OPEN CONF_CURSOR FOR
 		SELECT CC.ID_CRITERION, CC.VALUE, CC.PRIORITY, CC.PERCENTAGE, CC.COMPARATOR  FROM CRITERIA_CONFIGURATION CC
-		WHERE CC.ID_CRITERION = p_id_criterion;
+		WHERE CC.ID_CRITERION = p_id_criterion
+		AND ROWNUM = 1;
 		RETURN CONF_CURSOR;
 	END GetCriteriaConfigurationData;
 
-	--Function to get the headquarters and careers in a string
-	FUNCTION GetHeadquarterAndCareerData(p_id_headquarter_career NUMBER) RETURN VARCHAR2 IS 
+	--Function to get the headquarters in a string
+	FUNCTION GetHeadquarter(p_id_headquarter_career NUMBER) RETURN VARCHAR2 IS 
 		V_HEADQUARTER_CITY VARCHAR2(50);
-		V_CAREER_NAME VARCHAR2(50);
 	BEGIN
-		SELECT h.HEADQUARTER_CITY, c.CAREER_NAME
-		INTO V_HEADQUARTER_CITY, V_CAREER_NAME
+		SELECT h.HEADQUARTER_CITY
+		INTO V_HEADQUARTER_CITY
 		FROM HEADQUARTERS_CAREERS hc 
 		INNER JOIN HEADQUARTERS h ON hc.ID_HEADQUARTER = h.ID_HEADQUARTER
-		INNER JOIN CAREERS c ON hc.ID_CAREER = c.ID_CAREER
 		WHERE hc.ID_HEADQUARTER_CAREER = p_id_headquarter_career;
 	
-		RETURN '' || V_HEADQUARTER_CITY || V_CAREER_NAME;
+		RETURN V_HEADQUARTER_CITY;
 	
 	EXCEPTION
 		WHEN NO_DATA_FOUND THEN
 			RETURN 'No data found for the id provided';
-	END GetHeadquarterAndCareerData;
+	END GetHeadquarter;
+	
+	--Function to get the career in a string	
+	FUNCTION GetCareerData(p_id_headquarter_career NUMBER) RETURN VARCHAR2 IS 
+		V_CAREER_NAME VARCHAR2(50);
+	BEGIN
+		SELECT c.CAREER_NAME
+		INTO V_CAREER_NAME
+		FROM HEADQUARTERS_CAREERS hc
+		INNER JOIN CAREERS c ON hc.ID_CAREER = c.ID_CAREER
+		WHERE hc.ID_HEADQUARTER_CAREER = p_id_headquarter_career;
+	
+		RETURN V_CAREER_NAME;
+	
+	EXCEPTION
+		WHEN NO_DATA_FOUND THEN
+			RETURN 'No data found for the id provided';
+	END GetCareerData;
 
 	--Function to get the education type in a string
 	FUNCTION GetEducationTypeData(p_id_education NUMBER) RETURN VARCHAR2 IS
@@ -74,20 +92,55 @@ CREATE OR REPLACE PACKAGE BODY SELECTION_PROCESS_PACKAGE AS
 			RETURN 'No data found for the id provided';
 	END GetEducationTypeData;
 
+	--Function that recieves a criterion id and return the column value in a list split by commas (',')
+	FUNCTION GetValueInList(p_id_criterion VARCHAR2) RETURN VARCHAR2 IS 
+		V_VALUE VARCHAR2(1000);
+		V_LIST VARCHAR2(1000);
+	BEGIN
+		--QUERY TO FIND VALUE
+		SELECT c.VALUE INTO V_VALUE
+		FROM CRITERIA c 
+		WHERE c.ID_CRITERION = p_id_criterion;
+	
+		IF (V_VALUE != NULL) THEN
+			--Verifies if there's a ',' in V_CRITERIA_VALUE. If true then the string is casted to a list
+			IF INSTR(V_VALUE, ',') > 0 THEN
+				--CONVERT TO LIST
+				--REGEXP_SUBSTR extracts string with a regular expression.'[^,]+' indicates string without ','
+				-- 1 means that the search process starts in the first character
+				SELECT LISTAGG('''' || TRIM(REGEXP_SUBSTR(V_VALUE, '[^,]+', 1, LEVEL)) || '''', ', ')
+		        INTO V_LIST
+		        FROM dual
+		        CONNECT BY REGEXP_SUBSTR(V_VALUE, '[^,]+', 1, LEVEL) IS NOT NULL;
+			ELSE
+				V_LIST := '''' || V_VALUE || '''';
+			END IF;
+				   
+		    RETURN V_LIST
+	    ELSE
+	    	RETURN NULL;
+		END IF;
+	
+	END GetValueInList;
+	
 	--Procedure that carries out the selection process
 	PROCEDURE ExecuteSelectionProcess IS
 	
 		CANDIDATES_CURSOR SYS_REFCURSOR;
 		CRITERIA_CURSOR SYS_REFCURSOR;
 		CONF_CURSOR SYS_REFCURSOR;
-	
+		
+		--Variables for candidates data
 		V_CANDIDATE_ID VARCHAR2(11);
 		V_CANDIDATE_SEX VARCHAR2(15);
 	    V_CANDIDATE_CITY VARCHAR2(50);
 	    V_CANDIDATE_ESTATE VARCHAR2(50);
 	    V_CANDIDATE_AGE NUMBER;
 	    V_CANDIDATE_ICFES NUMBER;
+	   	V_ID_HEADQUARTERS_CAREER NUMBER;
+	   	V_ID_EDUCATION NUMBER;
 	   
+	   	--Variables for headquarters and careers data
 	   	V_HEADQUARTER_CAREER VARCHAR2(50);
 	   	V_HEADQUARTER VARCHAR2(50);
 	   	V_CAREER VARCHAR2(50);
@@ -104,14 +157,28 @@ CREATE OR REPLACE PACKAGE BODY SELECTION_PROCESS_PACKAGE AS
 	   	V_CONF_COMPARATOR VARCHAR2(30);
 	   
 		v_percentage NUMBER := 0;
+		v_list VARCHAR2(100);
+	
+		V_LIST_SEX VARCHAR(1000);
+		V_LIST_CITY VARCHAR(1000);
+		V_LIST_ESTATE VARCHAR(1000);
+		V_LIST_EDUCATION_TYPE VARCHAR(1000);
+		V_LIST_HEADQUARTER VARCHAR(1000);
+		V_LIST_CAREER VARCHAR(1000);
        
       BEGIN
-	       
+	    V_LIST_SEX := GetValueInList('1');
+	    V_LIST_CITY := GetValueInList('2');
+	    V_LIST_ESTATE := GetValueInList('3');
+	    V_LIST_EDUCATION_TYPE := GetValueInList('5');
+	    V_LIST_HEADQUARTER := GetValueInList('7');
+	    V_LIST_CAREER := GetValueInList('8');
+	    
 		CANDIDATES_CURSOR := GetCandidatesData;
 		
 		LOOP
-			
-			FETCH CANDIDATES_CURSOR INTO V_CANDIDATE_ID,V_CANDIDATE_SEX,V_CANDIDATE_CITY,V_CANDIDATE_ESTATE,V_CANDIDATE_AGE,V_CANDIDATE_ICFES;
+			v_percentage := 0;
+			FETCH CANDIDATES_CURSOR INTO V_CANDIDATE_ID,V_CANDIDATE_SEX,V_CANDIDATE_CITY,V_CANDIDATE_ESTATE,V_CANDIDATE_AGE,V_CANDIDATE_ICFES, V_ID_HEADQUARTERS_CAREER, V_ID_EDUCATION;
 			EXIT WHEN CANDIDATES_CURSOR%NOTFOUND;
 			
 			CRITERIA_CURSOR := GetCriteriaData;
@@ -120,8 +187,46 @@ CREATE OR REPLACE PACKAGE BODY SELECTION_PROCESS_PACKAGE AS
 				FETCH CRITERIA_CURSOR INTO V_CRITERIA_ID,V_CRITERIA_VALUE;
 				EXIT WHEN CRITERIA_CURSOR%NOTFOUND;
 			
-				IF (V_CRITERIA_ID = '1') THEN
+				IF (V_CRITERIA_VALUE != null) THEN
+				
+					CONF_CURSOR := GetCriteriaConfigurationData(V_CRITERIA_ID);
+					FETCH CONF_CURSOR INTO V_CONF_ID,V_CONF_VALUE,V_CONF_PRIORITY,V_CONF_PERCENTAGE,V_CONF_COMPARATOR;
 					
+						IF (V_CRITERIA_ID = '1') THEN
+							IF (V_CANDIDATE_SEX IN V_LIST_SEX) THEN
+								v_percentage := v_percentage + V_CONF_PERCENTAGE;
+							END IF;
+						ELSIF (V_CRITERIA_ID = '2') THEN
+							IF (V_CANDIDATE_CITY IN V_LIST_CITY) THEN
+								v_percentage := v_percentage + V_CONF_PERCENTAGE;
+							END IF;
+						ELSIF (V_CRITERIA_ID = '3') THEN
+							IF (V_CANDIDATE_ESTATE IN V_LIST_ESTATE) THEN
+								v_percentage := v_percentage + V_CONF_PERCENTAGE;
+							END IF;
+						ELSIF (V_CRITERIA_ID = '4') THEN
+							--AGE
+						ELSIF (V_CRITERIA_ID = '5') THEN
+							V_EDUCATION := GetEducationTypeData(V_ID_EDUCATION);
+							IF (V_EDUCATION IN V_LIST_EDUCATION_TYPE) THEN
+								v_percentage := v_percentage + V_CONF_PERCENTAGE;
+							END IF;
+						ELSIF (V_CRITERIA_ID = '6') THEN
+							--ICFES
+						ELSIF (V_CRITERIA_ID = '7') THEN
+							V_HEADQUARTER := GetHeadquarter(V_ID_HEADQUARTERS_CAREER);
+							IF (V_HEADQUARTER IN V_LIST_HEADQUARTER) THEN
+								v_percentage := v_percentage + V_CONF_PERCENTAGE;
+							END IF;
+						ELSIF (V_CRITERIA_ID = '8') THEN
+							V_CAREER := GetCareerData(V_ID_HEADQUARTERS_CAREER);
+							IF (V_CAREER IN V_LIST_CAREER) THEN
+								v_percentage := v_percentage + V_CONF_PERCENTAGE;
+							END IF;
+						END IF;
+				
+					CLOSE CONF_CURSOR;
+							
 				END IF;
 			
 			END LOOP;
