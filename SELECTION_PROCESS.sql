@@ -3,11 +3,13 @@ CREATE OR REPLACE PACKAGE SELECTION_PROCESS_PACKAGE AS
 	FUNCTION GetCandidatesData RETURN SYS_REFCURSOR;
 	FUNCTION GetCriteriaData RETURN SYS_REFCURSOR;
 	FUNCTION GetCriteriaConfigurationData(p_id_criterion VARCHAR2) RETURN SYS_REFCURSOR;
+	FUNCTION GetPriorizationData(p_id_criterion VARCHAR2) RETURN SYS_REFCURSOR;
 	FUNCTION GetHeadquarter(p_id_headquarter_career NUMBER) RETURN VARCHAR2;
 	FUNCTION GetCareerData(p_id_headquarter_career NUMBER) RETURN VARCHAR2;
 	FUNCTION GetEducationTypeData(p_id_education NUMBER) RETURN VARCHAR2;
 	FUNCTION GetValueInList(p_id_criterion VARCHAR2) RETURN VARCHAR2;
-	PROCEDURE ExecuteSelectionProcess;
+	FUNCTION ExecuteSelectionProcessPercentages RETURN SelectionsTableType;
+	PROCEDURE StoreSelectionProcessData;
 	
 END SELECTION_PROCESS_PACKAGE;
 
@@ -42,6 +44,20 @@ CREATE OR REPLACE PACKAGE BODY SELECTION_PROCESS_PACKAGE AS
 		AND ROWNUM = 1;
 		RETURN CONF_CURSOR;
 	END GetCriteriaConfigurationData;
+
+	--Function to get the priorization data from a criterion
+	FUNCTION GetPriorizationData(p_id_criterion VARCHAR2) RETURN SYS_REFCURSOR IS
+		PRIO_CURSOR SYS_REFCURSOR;
+	BEGIN
+		OPEN PRIO_CURSOR FOR
+		SELECT CC.ID_CRITERION, CC.VALUE, CC.PRIORITY, CC.PERCENTAGE, CC.COMPARATOR  FROM CRITERIA_CONFIGURATION CC
+		WHERE CC.ID_CRITERION = p_id_criterion
+		AND CC.VALUE IS NOT NULL;
+		RETURN PRIO_CURSOR;
+	EXCEPTION
+		WHEN NO_DATA_FOUND THEN
+			RETURN NULL;
+	END GetPriorizationData;
 
 	--Function to get the headquarters in a string
 	FUNCTION GetHeadquarter(p_id_headquarter_career NUMBER) RETURN VARCHAR2 IS 
@@ -124,11 +140,12 @@ CREATE OR REPLACE PACKAGE BODY SELECTION_PROCESS_PACKAGE AS
 	END GetValueInList;
 	
 	--Procedure that carries out the selection process
-	PROCEDURE ExecuteSelectionProcess IS
+	FUNCTION ExecuteSelectionProcessPercentages RETURN SelectionsTableType IS
 	
 		CANDIDATES_CURSOR SYS_REFCURSOR;
 		CRITERIA_CURSOR SYS_REFCURSOR;
 		CONF_CURSOR SYS_REFCURSOR;
+		PRIO_CURSOR SYS_REFCURSOR;
 		
 		--Variables for candidates data
 		V_CANDIDATE_ID VARCHAR2(11);
@@ -150,13 +167,22 @@ CREATE OR REPLACE PACKAGE BODY SELECTION_PROCESS_PACKAGE AS
 	   	V_CRITERIA_ID VARCHAR2(10);
 	   	V_CRITERIA_VALUE VARCHAR2(100);
 	   	
+	   --Variables to fetch data from GetCriteriaConfigurationData
 	   	V_CONF_ID VARCHAR2(10);
 	   	V_CONF_VALUE VARCHAR2(50);
-	   	V_CONF_PRIORITY VARCHAR2(10);
+	   	V_CONF_PRIORITY NUMBER;
 	   	V_CONF_PERCENTAGE NUMBER;
 	   	V_CONF_COMPARATOR VARCHAR2(30);
 	   
+	   --Variables to fetch data from GetPriorizationData
+	   	V_PRIO_ID VARCHAR2(10);
+	   	V_PRIO_VALUE VARCHAR2(50);
+	   	V_PRIO_PRIORITY NUMBER;
+	   	V_PRIO_PERCENTAGE NUMBER;
+	   	V_PRIO_COMPARATOR VARCHAR2(30);
+	   
 		v_percentage NUMBER := 0;
+		V_PRIORITY NUMBER := 30;
 		v_list VARCHAR2(100);
 	
 		V_LIST_SEX VARCHAR(1000);
@@ -165,6 +191,15 @@ CREATE OR REPLACE PACKAGE BODY SELECTION_PROCESS_PACKAGE AS
 		V_LIST_EDUCATION_TYPE VARCHAR(1000);
 		V_LIST_HEADQUARTER VARCHAR(1000);
 		V_LIST_CAREER VARCHAR(1000);
+	
+		--Variable for quantitative value from criteria configuration converted to number
+		V_QUANT_VALUE NUMBER := 0;
+	
+		V_ID_PROCESS VARCHAR2(10);
+		V_CURRENT_DATE TIMESTAMP := SYSTIMESTAMP;
+		V_DATE_STRING VARCHAR2(100);
+	
+		V_FINAL_RESULTS SELECTIONS_TABLE_TYPE := SELECTIONS_TABLE_TYPE();
        
       BEGIN
 	    V_LIST_SEX := GetValueInList('1');
@@ -173,15 +208,25 @@ CREATE OR REPLACE PACKAGE BODY SELECTION_PROCESS_PACKAGE AS
 	    V_LIST_EDUCATION_TYPE := GetValueInList('5');
 	    V_LIST_HEADQUARTER := GetValueInList('7');
 	    V_LIST_CAREER := GetValueInList('8');
+	   
+	   	V_DATE_STRING := TO_CHAR(V_CURRENT_DATE, 'YYYY-MM-DD HH24:MI:SS');
+	  
+	   	--New record for new selection process is created.
+	  	INSERT INTO SELECTION_PROCESSES(PROCESS_DATE)
+	  	VALUES (V_DATE_STRING) RETURNING ID_PROCESS INTO V_ID_PROCESS;
+	  
+	  	--Creates a new partition in SELECTION with V_ID_PROCESS
+	  	EXECUTE INMEDIATE 'ALTER TABLE SELECTIONS ADD PARTITION p' || V_ID_PROCESS || ' VALUES (''' || V_ID_PROCESS || ''')';
 	    
-		CANDIDATES_CURSOR := GetCandidatesData;
+		CANDIDATES_CURSOR := GetCandidatesData();
 		
 		LOOP
 			v_percentage := 0;
+			V_PRIORITY := 30;
 			FETCH CANDIDATES_CURSOR INTO V_CANDIDATE_ID,V_CANDIDATE_SEX,V_CANDIDATE_CITY,V_CANDIDATE_ESTATE,V_CANDIDATE_AGE,V_CANDIDATE_ICFES, V_ID_HEADQUARTERS_CAREER, V_ID_EDUCATION;
 			EXIT WHEN CANDIDATES_CURSOR%NOTFOUND;
 			
-			CRITERIA_CURSOR := GetCriteriaData;
+			CRITERIA_CURSOR := GetCriteriaData();
 		
 			LOOP 
 				FETCH CRITERIA_CURSOR INTO V_CRITERIA_ID,V_CRITERIA_VALUE;
@@ -195,33 +240,154 @@ CREATE OR REPLACE PACKAGE BODY SELECTION_PROCESS_PACKAGE AS
 						IF (V_CRITERIA_ID = '1') THEN
 							IF (V_CANDIDATE_SEX IN V_LIST_SEX) THEN
 								v_percentage := v_percentage + V_CONF_PERCENTAGE;
+								
+								--If GetCriteriaConfigurationData finds data then it calculates the priority
+								PRIO_CURSOR := GetCriteriaConfigurationData(V_CRITERIA_ID);
+								IF(PRIO_CURSOR != NULL) THEN
+									LOOP
+										FETCH PRIO_CURSOR INTO V_PRIO_ID,V_PRIO_VALUE,V_PRIO_PRIORITY,V_PRIO_PERCENTAGE,V_PRIO_COMPARATOR;
+										EXIT WHEN PRIO_CURSOR%NOTFOUND;
+									
+										IF (V_CANDIDATE_SEX = V_PRIO_VALUE) THEN
+											V_PRIORITY := V_PRIORITY + TO_NUMBER(V_PRIO_PRIORITY);
+										END IF;
+								
+									END LOOP;
+								END IF;
+							
+								CLOSE PRIO_CURSOR;
+								
 							END IF;
 						ELSIF (V_CRITERIA_ID = '2') THEN
 							IF (V_CANDIDATE_CITY IN V_LIST_CITY) THEN
 								v_percentage := v_percentage + V_CONF_PERCENTAGE;
+								
+								--If GetCriteriaConfigurationData finds data then it calculates the priority
+								PRIO_CURSOR := GetCriteriaConfigurationData(V_CRITERIA_ID);
+								IF(PRIO_CURSOR != NULL) THEN
+									LOOP
+										FETCH PRIO_CURSOR INTO V_PRIO_ID,V_PRIO_VALUE,V_PRIO_PRIORITY,V_PRIO_PERCENTAGE,V_PRIO_COMPARATOR;
+										EXIT WHEN PRIO_CURSOR%NOTFOUND;
+									
+										IF (V_CANDIDATE_CITY = V_PRIO_VALUE) THEN
+											V_PRIORITY := V_PRIORITY + TO_NUMBER(V_PRIO_PRIORITY);
+										END IF;
+								
+									END LOOP;
+								END IF;
+							
+								CLOSE PRIO_CURSOR;
 							END IF;
 						ELSIF (V_CRITERIA_ID = '3') THEN
 							IF (V_CANDIDATE_ESTATE IN V_LIST_ESTATE) THEN
 								v_percentage := v_percentage + V_CONF_PERCENTAGE;
+							
+								--If GetCriteriaConfigurationData finds data then it calculates the priority
+								PRIO_CURSOR := GetCriteriaConfigurationData(V_CRITERIA_ID);
+								IF(PRIO_CURSOR != NULL) THEN
+									LOOP
+										FETCH PRIO_CURSOR INTO V_PRIO_ID,V_PRIO_VALUE,V_PRIO_PRIORITY,V_PRIO_PERCENTAGE,V_PRIO_COMPARATOR;
+										EXIT WHEN PRIO_CURSOR%NOTFOUND;
+									
+										IF (V_CANDIDATE_ESTATE = V_PRIO_VALUE) THEN
+											V_PRIORITY := V_PRIORITY + TO_NUMBER(V_PRIO_PRIORITY);
+										END IF;
+								
+									END LOOP;
+								END IF;
+							
+								CLOSE PRIO_CURSOR;
 							END IF;
 						ELSIF (V_CRITERIA_ID = '4') THEN
 							--AGE
+							V_QUANT_VALUE := TO_NUMBER(V_CONF_VALUE);
+							IF ((V_CONF_COMPARATOR = 'Mayor a' AND V_CANDIDATE_AGE > V_QUANT_VALUE) OR (V_CONF_COMPARATOR = 'Menor a' AND V_CANDIDATE_AGE < V_QUANT_VALUE)) THEN
+								v_percentage := v_percentage + V_CONF_PERCENTAGE;
+							
+								IF ((V_CONF_COMPARATOR = 'Mayor a' AND V_CANDIDATE_AGE > TO_NUMBER(V_CONF_PRIORITY)) 
+											OR 
+											(V_CONF_COMPARATOR = 'Menor a' AND V_CANDIDATE_AGE < TO_NUMBER(V_CONF_PRIORITY))) THEN
+											V_PRIORITY := V_PRIORITY + TO_NUMBER(V_CONF_PRIORITY);
+								ELSE
+									V_PRIORITY := V_PRIORITY + TO_NUMBER(V_CONF_PRIORITY) + 1;
+								END IF;
+							
+							END IF;
 						ELSIF (V_CRITERIA_ID = '5') THEN
 							V_EDUCATION := GetEducationTypeData(V_ID_EDUCATION);
 							IF (V_EDUCATION IN V_LIST_EDUCATION_TYPE) THEN
 								v_percentage := v_percentage + V_CONF_PERCENTAGE;
+							
+								--If GetCriteriaConfigurationData finds data then it calculates the priority
+								PRIO_CURSOR := GetCriteriaConfigurationData(V_CRITERIA_ID);
+								IF(PRIO_CURSOR != NULL) THEN
+									LOOP
+										FETCH PRIO_CURSOR INTO V_PRIO_ID,V_PRIO_VALUE,V_PRIO_PRIORITY,V_PRIO_PERCENTAGE,V_PRIO_COMPARATOR;
+										EXIT WHEN PRIO_CURSOR%NOTFOUND;
+									
+										IF (V_EDUCATION = V_PRIO_VALUE) THEN
+											V_PRIORITY := V_PRIORITY + TO_NUMBER(V_PRIO_PRIORITY);
+										END IF;
+									END LOOP;
+								END IF;
+							
+								CLOSE PRIO_CURSOR;
 							END IF;
 						ELSIF (V_CRITERIA_ID = '6') THEN
 							--ICFES
+							V_QUANT_VALUE := TO_NUMBER(V_CONF_VALUE);
+							IF ((V_CONF_COMPARATOR = 'Mayor a' AND V_CANDIDATE_ICFES > V_QUANT_VALUE) OR (V_CONF_COMPARATOR = 'Menor a' AND V_CANDIDATE_ICFES < V_QUANT_VALUE)) THEN
+								v_percentage := v_percentage + V_CONF_PERCENTAGE;
+							
+								IF ((V_CONF_COMPARATOR = 'Mayor a' AND V_CANDIDATE_AGE > TO_NUMBER(V_CONF_PRIORITY)) 
+											OR 
+											(V_CONF_COMPARATOR = 'Menor a' AND V_CANDIDATE_AGE < TO_NUMBER(V_CONF_PRIORITY))) THEN
+											
+											V_PRIORITY := V_PRIORITY + TO_NUMBER(V_CONF_PRIORITY);
+								ELSE
+									V_PRIORITY := V_PRIORITY + TO_NUMBER(V_CONF_PRIORITY) + 1;
+								END IF;
+							
+							END IF;
 						ELSIF (V_CRITERIA_ID = '7') THEN
 							V_HEADQUARTER := GetHeadquarter(V_ID_HEADQUARTERS_CAREER);
 							IF (V_HEADQUARTER IN V_LIST_HEADQUARTER) THEN
 								v_percentage := v_percentage + V_CONF_PERCENTAGE;
+							
+								--If GetCriteriaConfigurationData finds data then it calculates the priority
+								PRIO_CURSOR := GetCriteriaConfigurationData(V_CRITERIA_ID);
+								IF(PRIO_CURSOR != NULL) THEN
+									LOOP
+										FETCH PRIO_CURSOR INTO V_PRIO_ID,V_PRIO_VALUE,V_PRIO_PRIORITY,V_PRIO_PERCENTAGE,V_PRIO_COMPARATOR;
+										EXIT WHEN PRIO_CURSOR%NOTFOUND;
+									
+										IF (V_HEADQUARTER = V_PRIO_VALUE) THEN
+											V_PRIORITY := V_PRIORITY + TO_NUMBER(V_PRIO_PRIORITY);
+										END IF;
+									END LOOP;
+								END IF;
+							
+								CLOSE PRIO_CURSOR;
 							END IF;
 						ELSIF (V_CRITERIA_ID = '8') THEN
 							V_CAREER := GetCareerData(V_ID_HEADQUARTERS_CAREER);
 							IF (V_CAREER IN V_LIST_CAREER) THEN
 								v_percentage := v_percentage + V_CONF_PERCENTAGE;
+							
+								--If GetCriteriaConfigurationData finds data then it calculates the priority
+								PRIO_CURSOR := GetCriteriaConfigurationData(V_CRITERIA_ID);
+								IF(PRIO_CURSOR != NULL) THEN
+									LOOP
+										FETCH PRIO_CURSOR INTO V_PRIO_ID,V_PRIO_VALUE,V_PRIO_PRIORITY,V_PRIO_PERCENTAGE,V_PRIO_COMPARATOR;
+										EXIT WHEN PRIO_CURSOR%NOTFOUND;
+									
+										IF (V_CAREER = V_PRIO_VALUE) THEN
+											V_PRIORITY := V_PRIORITY + TO_NUMBER(V_PRIO_PRIORITY);
+										END IF;
+									END LOOP;
+								END IF;
+							
+								CLOSE PRIO_CURSOR;
 							END IF;
 						END IF;
 				
@@ -233,16 +399,37 @@ CREATE OR REPLACE PACKAGE BODY SELECTION_PROCESS_PACKAGE AS
 			
 		
 			CLOSE CRITERIA_CURSOR;
+		
+			V_FINAL_RESULTS.EXTEND;
+			V_FINAL_RESULTS(V_FINAL_RESULTS.LAST) := SELECTIONS_RECORD(ID_INCREMENT_SELECTIONS.NEXTVAL, V_CANDIDATE_ID, V_ID_PROCESS, v_percentage, V_PRIORITY);
 			
 		END LOOP;
 		
+		V_FINAL_RESULTS := MULTISET(SELECT * FROM TABLE(V_FINAL_RESULTS) ORDER BY PERCENTAGE DESC, PRIORITY ASC);
 	
 		CLOSE CANDIDATES_CURSOR;
-	
-	END ExecuteSelectionProcess;
+		RETURN V_FINAL_RESULTS;
+	END ExecuteSelectionProcessPercentages;
 
+	--Procedure to execute selection process and store data in SELECTIONS table
+	PROCEDURE StoreSelectionProcessData IS
+		V_FINAL_RESULTS SELECTIONS_TABLE_TYPE;
+	
+	BEGIN
+		V_FINAL_RESULTS := ExecuteSelectionProcessPercentages();
+		
+		FOR i IN 1..V_FINAL_RESULTS.COUNT LOOP
+			INSERT INTO SELECTIONS (ID_SELECTION, ID_CANDIDATE, ID_SELECTION_PROCESS, PERCENTAGE, PRIORITY)
+			VALUES (V_FINAL_RESULTS(i).ID_SELECTION, V_FINAL_RESULTS(i).ID_CANDIDATE, V_FINAL_RESULTS(i).ID_SELECTION_PROCESS, 
+					V_FINAL_RESULTS(i).PERCENTAGE, V_FINAL_RESULTS(i).PRIORITY);
+		END LOOP;
+		
+	END StoreSelectionProcessData;
+	
 
 END SELECTION_PROCESS_PACKAGE;--FIN DEL PAQUETE
+
+
 
 
 --BEGIN
