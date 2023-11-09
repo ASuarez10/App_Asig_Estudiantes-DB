@@ -22,7 +22,8 @@ CREATE OR REPLACE PACKAGE BODY SELECTION_PROCESS_PACKAGE AS
 	BEGIN 
 		OPEN CANDIDATES_CURSOR FOR
 		SELECT ID_CANDIDATE, SEX, CITY, ESTATE, AGE, ICFES_GENERAL, ID_HEADQUARTER_CAREER, ID_EDUCATION 
-		FROM CANDIDATES ;
+		FROM CANDIDATES; 
+		--WHERE ROWNUM = 1;
 		RETURN CANDIDATES_CURSOR;
 	END GetCandidatesData;
 
@@ -112,7 +113,7 @@ CREATE OR REPLACE PACKAGE BODY SELECTION_PROCESS_PACKAGE AS
 		SELECT et.EDUCATION_TYPE_NAME
 		INTO V_EDUCATION_NAME
 		FROM EDUCATION_TYPES et
-		WHERE et.EDUCATION_TYPE_NAME = p_id_education;
+		WHERE et.ID_EDUCATION_TYPE  = p_id_education;
 	
 		RETURN V_EDUCATION_NAME;
 	EXCEPTION
@@ -130,7 +131,9 @@ CREATE OR REPLACE PACKAGE BODY SELECTION_PROCESS_PACKAGE AS
 		FROM CRITERIA c 
 		WHERE c.ID_CRITERION = p_id_criterion;
 	
-		IF (V_VALUE != NULL) THEN
+		DBMS_OUTPUT.PUT_LINE('Value a convertir en lista' || V_VALUE);
+	
+		IF ((V_VALUE IS NOT NULL) AND (V_VALUE != 'Undefined')) THEN
 			--Verifies if there's a ',' in V_CRITERIA_VALUE. If true then the string is casted to a list
 			IF INSTR(V_VALUE, ',') > 0 THEN
 				--CONVERT TO LIST
@@ -246,15 +249,19 @@ CREATE OR REPLACE PACKAGE BODY SELECTION_PROCESS_PACKAGE AS
 				FETCH CRITERIA_CURSOR INTO V_CRITERIA_ID,V_CRITERIA_VALUE;
 				EXIT WHEN CRITERIA_CURSOR%NOTFOUND;
 			
+				--DBMS_OUTPUT.PUT_LINE('Criteria value ' || V_CRITERIA_VALUE);
+			
 				IF ((V_CRITERIA_VALUE IS NOT NULL) AND (V_CRITERIA_VALUE != 'Undefined')) THEN
 				
 					CONF_CURSOR := GetCriteriaConfigurationData(V_CRITERIA_ID, p_is_automatized);
 					FETCH CONF_CURSOR INTO V_CONF_ID,V_CONF_VALUE,V_CONF_PRIORITY,V_CONF_PERCENTAGE,V_CONF_COMPARATOR;
 					
 						IF (V_CRITERIA_ID = '1') THEN
-							IF (V_CANDIDATE_SEX IN (V_LIST_SEX)) THEN
+							--DBMS_OUTPUT.PUT_LINE('Sexo ' || V_CANDIDATE_SEX);
+							--DBMS_OUTPUT.PUT_LINE('Lista a comparar ' || (V_LIST_SEX));
+							IF INSTR(V_LIST_SEX, '''' || V_CANDIDATE_SEX || '''') > 0 THEN
 								v_percentage := v_percentage + V_CONF_PERCENTAGE;
-								
+								--DBMS_OUTPUT.PUT_LINE('Porcentaje actual ' || v_percentage);
 								--If GetCriteriaConfigurationData finds data then it calculates the priority
 								PRIO_CURSOR := GetPriorizationData(V_CRITERIA_ID, p_is_automatized);
 								IF(PRIO_CURSOR IS NOT NULL) THEN
@@ -265,7 +272,7 @@ CREATE OR REPLACE PACKAGE BODY SELECTION_PROCESS_PACKAGE AS
 										IF (V_CANDIDATE_SEX = V_PRIO_VALUE) THEN
 											V_PRIORITY := V_PRIORITY + TO_NUMBER(V_PRIO_PRIORITY);
 										END IF;
-								
+									--DBMS_OUTPUT.PUT_LINE('Prioridad actual ' || V_PRIORITY);
 									END LOOP;
 								END IF;
 							
@@ -273,9 +280,11 @@ CREATE OR REPLACE PACKAGE BODY SELECTION_PROCESS_PACKAGE AS
 								
 							END IF;
 						ELSIF (V_CRITERIA_ID = '2') THEN
-							IF (V_CANDIDATE_CITY IN (V_LIST_CITY)) THEN
+							--DBMS_OUTPUT.PUT_LINE('Ciudad ' || V_CANDIDATE_CITY);
+							--DBMS_OUTPUT.PUT_LINE('Lista a comparar ' || (V_LIST_CITY));
+							IF INSTR(V_LIST_CITY, '''' || V_CANDIDATE_CITY || '''') > 0 THEN
 								v_percentage := v_percentage + V_CONF_PERCENTAGE;
-								
+								--DBMS_OUTPUT.PUT_LINE('Porcentaje actual ' || v_percentage);
 								--If GetCriteriaConfigurationData finds data then it calculates the priority
 								PRIO_CURSOR := GetPriorizationData(V_CRITERIA_ID, p_is_automatized);
 								IF(PRIO_CURSOR IS NOT NULL) THEN
@@ -286,16 +295,18 @@ CREATE OR REPLACE PACKAGE BODY SELECTION_PROCESS_PACKAGE AS
 										IF (V_CANDIDATE_CITY = V_PRIO_VALUE) THEN
 											V_PRIORITY := V_PRIORITY + TO_NUMBER(V_PRIO_PRIORITY);
 										END IF;
-								
+									--DBMS_OUTPUT.PUT_LINE('Prioridad actual ' || V_PRIORITY);
 									END LOOP;
 								END IF;
-							
+								
 								CLOSE PRIO_CURSOR;
 							END IF;
 						ELSIF (V_CRITERIA_ID = '3') THEN
-							IF (V_CANDIDATE_ESTATE IN (V_LIST_ESTATE)) THEN
+							--DBMS_OUTPUT.PUT_LINE('Departamento ' || V_CANDIDATE_ESTATE);
+							--DBMS_OUTPUT.PUT_LINE('Lista a comparar ' || (V_LIST_ESTATE));
+							IF INSTR(V_LIST_ESTATE, '''' || V_CANDIDATE_ESTATE || '''') > 0 THEN
 								v_percentage := v_percentage + V_CONF_PERCENTAGE;
-							
+								--DBMS_OUTPUT.PUT_LINE('Porcentaje actual ' || v_percentage);
 								--If GetCriteriaConfigurationData finds data then it calculates the priority
 								PRIO_CURSOR := GetPriorizationData(V_CRITERIA_ID, p_is_automatized);
 								IF(PRIO_CURSOR IS NOT NULL) THEN
@@ -306,7 +317,7 @@ CREATE OR REPLACE PACKAGE BODY SELECTION_PROCESS_PACKAGE AS
 										IF (V_CANDIDATE_ESTATE = V_PRIO_VALUE) THEN
 											V_PRIORITY := V_PRIORITY + TO_NUMBER(V_PRIO_PRIORITY);
 										END IF;
-								
+									--DBMS_OUTPUT.PUT_LINE('Prioridad actual ' || V_PRIORITY);
 									END LOOP;
 								END IF;
 							
@@ -315,23 +326,31 @@ CREATE OR REPLACE PACKAGE BODY SELECTION_PROCESS_PACKAGE AS
 						ELSIF (V_CRITERIA_ID = '4') THEN
 							--AGE
 							V_QUANT_VALUE := TO_NUMBER(V_CONF_VALUE);
+							--DBMS_OUTPUT.PUT_LINE('Edad ' || V_CANDIDATE_AGE);
+							--DBMS_OUTPUT.PUT_LINE('Edad a comparar porcentaje' || V_CONF_VALUE);
+							--DBMS_OUTPUT.PUT_LINE('Comparador ' || V_CONF_COMPARATOR);
 							IF ((V_CONF_COMPARATOR = 'Mayor a' AND V_CANDIDATE_AGE > TO_NUMBER(V_CONF_VALUE)) OR (V_CONF_COMPARATOR = 'Menor a' AND V_CANDIDATE_AGE < TO_NUMBER(V_CONF_VALUE))) THEN
 								v_percentage := v_percentage + TO_NUMBER(V_CONF_PERCENTAGE);
-							
+								--DBMS_OUTPUT.PUT_LINE('Porcentaje actual ' || v_percentage);
+								--DBMS_OUTPUT.PUT_LINE('Edad a comparar prioridad' || V_CONF_PRIORITY);
 								IF ((V_CONF_COMPARATOR = 'Mayor a' AND V_CANDIDATE_AGE > TO_NUMBER(V_CONF_PRIORITY)) 
 											OR 
 											(V_CONF_COMPARATOR = 'Menor a' AND V_CANDIDATE_AGE < TO_NUMBER(V_CONF_PRIORITY))) THEN
+											DBMS_OUTPUT.PUT_LINE('Entra en la condicion');
 											V_PRIORITY := V_PRIORITY + TO_NUMBER(V_CONF_PRIORITY);
 								ELSE
+									--DBMS_OUTPUT.PUT_LINE('No entra en la condicion');
 									V_PRIORITY := V_PRIORITY + TO_NUMBER(V_CONF_PRIORITY) + 1;
 								END IF;
-							
+								--DBMS_OUTPUT.PUT_LINE('Prioridad actual ' || V_PRIORITY);
 							END IF;
 						ELSIF (V_CRITERIA_ID = '5') THEN
 							V_EDUCATION := GetEducationTypeData(V_ID_EDUCATION);
-							IF (V_EDUCATION IN (V_LIST_EDUCATION_TYPE)) THEN
+							--DBMS_OUTPUT.PUT_LINE('Educacion ' || V_EDUCATION);
+							--DBMS_OUTPUT.PUT_LINE('Lista a comparar ' || (V_LIST_EDUCATION_TYPE));
+							IF INSTR(V_LIST_EDUCATION_TYPE, '''' || V_EDUCATION || '''') > 0 THEN
 								v_percentage := v_percentage + V_CONF_PERCENTAGE;
-							
+								--DBMS_OUTPUT.PUT_LINE('Porcentaje actual ' || v_percentage);
 								--If GetCriteriaConfigurationData finds data then it calculates the priority
 								PRIO_CURSOR := GetPriorizationData(V_CRITERIA_ID, p_is_automatized);
 								IF(PRIO_CURSOR IS NOT NULL) THEN
@@ -342,6 +361,7 @@ CREATE OR REPLACE PACKAGE BODY SELECTION_PROCESS_PACKAGE AS
 										IF (V_EDUCATION = V_PRIO_VALUE) THEN
 											V_PRIORITY := V_PRIORITY + TO_NUMBER(V_PRIO_PRIORITY);
 										END IF;
+									--DBMS_OUTPUT.PUT_LINE('Prioridad actual ' || V_PRIORITY);
 									END LOOP;
 								END IF;
 							
@@ -350,9 +370,13 @@ CREATE OR REPLACE PACKAGE BODY SELECTION_PROCESS_PACKAGE AS
 						ELSIF (V_CRITERIA_ID = '6') THEN
 							--ICFES
 							V_QUANT_VALUE := TO_NUMBER(V_CONF_VALUE);
+							--DBMS_OUTPUT.PUT_LINE('Icfes ' || V_CANDIDATE_ICFES);
+							--DBMS_OUTPUT.PUT_LINE('Icfes a comparar porcentaje' || V_CONF_VALUE);
+							--DBMS_OUTPUT.PUT_LINE('Comparador ' || V_CONF_COMPARATOR);
 							IF ((V_CONF_COMPARATOR = 'Mayor a' AND V_CANDIDATE_ICFES > V_QUANT_VALUE) OR (V_CONF_COMPARATOR = 'Menor a' AND V_CANDIDATE_ICFES < V_QUANT_VALUE)) THEN
 								v_percentage := v_percentage + V_CONF_PERCENTAGE;
-							
+								--DBMS_OUTPUT.PUT_LINE('Porcentaje actual ' || v_percentage);
+								--DBMS_OUTPUT.PUT_LINE('Icfes a comparar prioridad' || V_CONF_PRIORITY);
 								IF ((V_CONF_COMPARATOR = 'Mayor a' AND V_CANDIDATE_AGE > TO_NUMBER(V_CONF_PRIORITY)) 
 											OR 
 											(V_CONF_COMPARATOR = 'Menor a' AND V_CANDIDATE_AGE < TO_NUMBER(V_CONF_PRIORITY))) THEN
@@ -361,13 +385,15 @@ CREATE OR REPLACE PACKAGE BODY SELECTION_PROCESS_PACKAGE AS
 								ELSE
 									V_PRIORITY := V_PRIORITY + TO_NUMBER(V_CONF_PRIORITY) + 1;
 								END IF;
-							
+								--DBMS_OUTPUT.PUT_LINE('Prioridad actual ' || V_PRIORITY);
 							END IF;
 						ELSIF (V_CRITERIA_ID = '7') THEN
 							V_HEADQUARTER := GetHeadquarter(V_ID_HEADQUARTERS_CAREER);
-							IF (V_HEADQUARTER IN (V_LIST_HEADQUARTER)) THEN
+							--DBMS_OUTPUT.PUT_LINE('Sede ' || V_HEADQUARTER);
+							--DBMS_OUTPUT.PUT_LINE('Lista a comparar ' || (V_LIST_HEADQUARTER));
+							IF INSTR(V_LIST_HEADQUARTER, '''' || V_HEADQUARTER || '''') > 0 THEN
 								v_percentage := v_percentage + V_CONF_PERCENTAGE;
-							
+								--DBMS_OUTPUT.PUT_LINE('Porcentaje actual ' || v_percentage);
 								--If GetCriteriaConfigurationData finds data then it calculates the priority
 								PRIO_CURSOR := GetPriorizationData(V_CRITERIA_ID, p_is_automatized);
 								IF(PRIO_CURSOR IS NOT NULL) THEN
@@ -378,6 +404,7 @@ CREATE OR REPLACE PACKAGE BODY SELECTION_PROCESS_PACKAGE AS
 										IF (V_HEADQUARTER = V_PRIO_VALUE) THEN
 											V_PRIORITY := V_PRIORITY + TO_NUMBER(V_PRIO_PRIORITY);
 										END IF;
+									--DBMS_OUTPUT.PUT_LINE('Prioridad actual ' || V_PRIORITY);
 									END LOOP;
 								END IF;
 							
@@ -385,9 +412,11 @@ CREATE OR REPLACE PACKAGE BODY SELECTION_PROCESS_PACKAGE AS
 							END IF;
 						ELSIF (V_CRITERIA_ID = '8') THEN
 							V_CAREER := GetCareerData(V_ID_HEADQUARTERS_CAREER);
-							IF (V_CAREER IN (V_LIST_CAREER)) THEN
+							--DBMS_OUTPUT.PUT_LINE('Carrera ' || V_CAREER);
+							--DBMS_OUTPUT.PUT_LINE('Lista a comparar ' || (V_LIST_CAREER));
+							IF INSTR(V_LIST_CAREER, '''' || V_CAREER || '''') > 0 THEN
 								v_percentage := v_percentage + V_CONF_PERCENTAGE;
-							
+								--DBMS_OUTPUT.PUT_LINE('Porcentaje actual ' || v_percentage);
 								--If GetCriteriaConfigurationData finds data then it calculates the priority
 								PRIO_CURSOR := GetPriorizationData(V_CRITERIA_ID, p_is_automatized);
 								IF(PRIO_CURSOR IS NOT NULL) THEN
@@ -398,6 +427,7 @@ CREATE OR REPLACE PACKAGE BODY SELECTION_PROCESS_PACKAGE AS
 										IF (V_CAREER = V_PRIO_VALUE) THEN
 											V_PRIORITY := V_PRIORITY + TO_NUMBER(V_PRIO_PRIORITY);
 										END IF;
+									--DBMS_OUTPUT.PUT_LINE('Prioridad actual ' || V_PRIORITY);
 									END LOOP;
 								END IF;
 							
@@ -430,16 +460,16 @@ CREATE OR REPLACE PACKAGE BODY SELECTION_PROCESS_PACKAGE AS
 	--Procedure to execute selection process and store data in SELECTIONS table
 	PROCEDURE StoreSelectionProcessData(p_is_automatized NUMBER) IS
 		V_FINAL_RESULTS SelectionsTableType;
-		V_FINAL_RESULTS_SORTED SelectionsTableType;
+		--V_FINAL_RESULTS_SORTED SelectionsTableType;
 	
 	BEGIN
 		V_FINAL_RESULTS := ExecuteSelectionProcessPercentages(p_is_automatized);
-		V_FINAL_RESULTS_SORTED := SortSelectionResults(V_FINAL_RESULTS);
+		--V_FINAL_RESULTS_SORTED := SortSelectionResults(V_FINAL_RESULTS);
 		
-		FOR i IN 1..V_FINAL_RESULTS_SORTED.COUNT LOOP
+		FOR i IN 1..V_FINAL_RESULTS.COUNT LOOP
 			INSERT INTO SELECTIONS (ID_SELECTION, ID_CANDIDATE, ID_SELECTION_PROCESS, PERCENTAGE, PRIORITY)
-			VALUES (V_FINAL_RESULTS_SORTED(i).ID_SELECTION, V_FINAL_RESULTS_SORTED(i).ID_CANDIDATE, V_FINAL_RESULTS_SORTED(i).ID_SELECTION_PROCESS, 
-					V_FINAL_RESULTS_SORTED(i).PERCENTAGE, V_FINAL_RESULTS_SORTED(i).PRIORITY);
+			VALUES (V_FINAL_RESULTS(i).ID_SELECTION, V_FINAL_RESULTS(i).ID_CANDIDATE, V_FINAL_RESULTS(i).ID_SELECTION_PROCESS, 
+					V_FINAL_RESULTS(i).PERCENTAGE, V_FINAL_RESULTS(i).PRIORITY);
 		END LOOP;
 		
 		--Delete records used in the selection process	
@@ -449,6 +479,7 @@ CREATE OR REPLACE PACKAGE BODY SELECTION_PROCESS_PACKAGE AS
 	
 	END StoreSelectionProcessData;
 
+	--NOT IN USE!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!
 	--Function to sort selection process results
 	FUNCTION SortSelectionResults (p_results SelectionsTableType) RETURN SelectionsTableType IS
 	
@@ -481,11 +512,143 @@ CREATE OR REPLACE PACKAGE BODY SELECTION_PROCESS_PACKAGE AS
 END SELECTION_PROCESS_PACKAGE;--FIN DEL PAQUETE
 
 
-
+--Ejecicion del proceso completo
 DECLARE
 	p_is_automatized NUMBER := 0;
 BEGIN
 	SELECTION_PROCESS_PACKAGE.StoreSelectionProcessData(p_is_automatized);
+END;
+
+--Prueba GetCriteriaData
+DECLARE
+    p_is_automatized NUMBER := 0;
+    V_CRITERIA_ID VARCHAR2(10);
+	V_CRITERIA_VALUE VARCHAR2(100);
+    CRITERIA_CURSOR SYS_REFCURSOR;
+BEGIN
+    -- Llamada a la función y asignación del cursor
+	CRITERIA_CURSOR := SELECTION_PROCESS_PACKAGE.GetCriteriaData(p_is_automatized);
+    LOOP 
+		FETCH CRITERIA_CURSOR INTO V_CRITERIA_ID,V_CRITERIA_VALUE;
+		EXIT WHEN CRITERIA_CURSOR%NOTFOUND;
+        -- Imprimir los valores
+        DBMS_OUTPUT.PUT_LINE('ID_CRITERION: ' || V_CRITERIA_ID || ', VALUE/SCHEDULED_VALUE: ' || V_CRITERIA_VALUE);
+    END LOOP;
+
+    -- Cerrar el cursor
+    CLOSE CRITERIA_CURSOR;
+END;
+
+--Prueba de GetConfigurationData
+--CC.ID_CRITERION, CC.VALUE, CC.PRIORITY, CC.PERCENTAGE, CC.COMPARATOR
+DECLARE
+    p_is_automatized NUMBER := 0;
+   	p_id_criterion VARCHAR2(10);
+    V_CONF_ID VARCHAR2(10);
+   	V_CONF_VALUE VARCHAR2(50);
+   	V_CONF_PRIORITY NUMBER;
+   	V_CONF_PERCENTAGE NUMBER;
+   	V_CONF_COMPARATOR VARCHAR2(30);
+    CONF_CURSOR SYS_REFCURSOR;
+BEGIN
+	p_id_criterion := '1';
+    -- Llamada a la función y asignación del cursor
+	CONF_CURSOR := SELECTION_PROCESS_PACKAGE.GetCriteriaConfigurationData(p_id_criterion, p_is_automatized);
+    LOOP 
+		FETCH CONF_CURSOR INTO V_CONF_ID,V_CONF_VALUE,V_CONF_PRIORITY,V_CONF_PERCENTAGE,V_CONF_COMPARATOR;
+		EXIT WHEN CONF_CURSOR%NOTFOUND;
+        -- Imprimir los valores
+        DBMS_OUTPUT.PUT_LINE(V_CONF_ID || ',' || V_CONF_VALUE || ',' || V_CONF_PRIORITY || ',' || V_CONF_PERCENTAGE || ',' || V_CONF_COMPARATOR);
+       
+       	IF (V_CONF_VALUE IS NULL) THEN
+       	DBMS_OUTPUT.PUT_LINE('Es null');
+       	END IF;
+       
+    END LOOP;
+
+    -- Cerrar el cursor
+    CLOSE CONF_CURSOR;
+END;
+
+--Prueba de GetPriorizationData
+--CC.ID_CRITERION, CC.VALUE, CC.PRIORITY, CC.PERCENTAGE, CC.COMPARATOR
+DECLARE
+    p_is_automatized NUMBER := 0;
+   	p_id_criterion VARCHAR2(10);
+    V_CONF_ID VARCHAR2(10);
+   	V_CONF_VALUE VARCHAR2(50);
+   	V_CONF_PRIORITY NUMBER;
+   	V_CONF_PERCENTAGE NUMBER;
+   	V_CONF_COMPARATOR VARCHAR2(30);
+    CONF_CURSOR SYS_REFCURSOR;
+BEGIN
+	p_id_criterion := '8';
+    -- Llamada a la función y asignación del cursor
+	CONF_CURSOR := SELECTION_PROCESS_PACKAGE.GetPriorizationData(p_id_criterion, p_is_automatized);
+    LOOP 
+		FETCH CONF_CURSOR INTO V_CONF_ID,V_CONF_VALUE,V_CONF_PRIORITY,V_CONF_PERCENTAGE,V_CONF_COMPARATOR;
+		EXIT WHEN CONF_CURSOR%NOTFOUND;
+        -- Imprimir los valores
+        DBMS_OUTPUT.PUT_LINE(V_CONF_ID || ',' || V_CONF_VALUE || ',' || V_CONF_PRIORITY || ',' || V_CONF_PERCENTAGE || ',' || V_CONF_COMPARATOR);
+       
+       	IF (V_CONF_VALUE IS NULL) THEN
+       	DBMS_OUTPUT.PUT_LINE('Es null');
+       	END IF;
+       
+    END LOOP;
+
+    -- Cerrar el cursor
+    CLOSE CONF_CURSOR;
+END;
+
+--Prueba de GetCandidatesData con solo 1 fila
+DECLARE
+	V_CANDIDATE_ID VARCHAR2(11);
+	V_CANDIDATE_SEX VARCHAR2(15);
+    V_CANDIDATE_CITY VARCHAR2(50);
+    V_CANDIDATE_ESTATE VARCHAR2(50);
+    V_CANDIDATE_AGE NUMBER;
+    V_CANDIDATE_ICFES NUMBER;
+   	V_ID_HEADQUARTERS_CAREER NUMBER;
+   	V_ID_EDUCATION NUMBER;
+   
+   	p_id_criterion VARCHAR2(10);
+   
+   	V_HEADQUARTER VARCHAR2(50);
+	V_CAREER VARCHAR2(50);
+	V_EDUCATION VARCHAR2(50);
+
+	V_LIST VARCHAR2(1000);
+   
+   CANDIDATES_CURSOR SYS_REFCURSOR;
+BEGIN
+	CANDIDATES_CURSOR := SELECTION_PROCESS_PACKAGE.GetCandidatesData();
+		
+	LOOP
+		FETCH CANDIDATES_CURSOR INTO V_CANDIDATE_ID,V_CANDIDATE_SEX,V_CANDIDATE_CITY,V_CANDIDATE_ESTATE,V_CANDIDATE_AGE,V_CANDIDATE_ICFES, V_ID_HEADQUARTERS_CAREER, V_ID_EDUCATION;
+		EXIT WHEN CANDIDATES_CURSOR%NOTFOUND;
+	
+		DBMS_OUTPUT.PUT_LINE(V_CANDIDATE_ID || ',' || V_CANDIDATE_SEX || ',' || V_CANDIDATE_CITY || ',' || V_CANDIDATE_ESTATE || ',' || V_CANDIDATE_AGE || ',' || V_CANDIDATE_ICFES || ',' || V_ID_HEADQUARTERS_CAREER || ',' || V_ID_EDUCATION);
+	
+		V_HEADQUARTER := SELECTION_PROCESS_PACKAGE.GetHeadquarter(V_ID_HEADQUARTERS_CAREER);
+		DBMS_OUTPUT.PUT_LINE(V_HEADQUARTER);
+	
+		V_CAREER := SELECTION_PROCESS_PACKAGE.GetCareerData(V_ID_HEADQUARTERS_CAREER);
+		DBMS_OUTPUT.PUT_LINE(V_CAREER);
+	
+		V_EDUCATION := SELECTION_PROCESS_PACKAGE.GetEducationTypeData(V_ID_EDUCATION);
+		DBMS_OUTPUT.PUT_LINE(V_EDUCATION);
+	
+		p_id_criterion := '2';
+	
+		V_LIST := SELECTION_PROCESS_PACKAGE.GetValueInList(p_id_criterion);
+		DBMS_OUTPUT.PUT_LINE('Lista:' || V_LIST);
+	
+		IF (V_LIST IS NULL) THEN
+			DBMS_OUTPUT.PUT_LINE('V_LIST ES NULL');
+		END IF;
+	
+	END LOOP;
 END;
 
 
