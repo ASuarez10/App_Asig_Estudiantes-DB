@@ -9,7 +9,6 @@ CREATE OR REPLACE PACKAGE SELECTION_PROCESS_PACKAGE AS
 	FUNCTION GetEducationTypeData(p_id_education NUMBER) RETURN VARCHAR2;
 	FUNCTION GetValueInList(p_id_criterion VARCHAR2) RETURN VARCHAR2;
 	FUNCTION ExecuteSelectionProcessPercentages (p_is_automatized NUMBER) RETURN SelectionsTableType;
-	FUNCTION SortSelectionResults (p_results SelectionsTableType) RETURN SelectionsTableType;
 	PROCEDURE StoreSelectionProcessData (p_is_automatized NUMBER);
 	
 END SELECTION_PROCESS_PACKAGE;
@@ -448,10 +447,6 @@ CREATE OR REPLACE PACKAGE BODY SELECTION_PROCESS_PACKAGE AS
 			V_FINAL_RESULTS(V_FINAL_RESULTS.LAST) := SELECTIONS_RECORD(ID_INCREMENT_SELECTIONS.NEXTVAL, V_CANDIDATE_ID, V_ID_PROCESS, v_percentage, V_PRIORITY);
 			
 		END LOOP;
-		
-		--V_FINAL_RESULTS := V_FINAL_RESULTS.ORDER BY PERCENTAGE DESC, PRIORITY ASC;
-		--V_FINAL_RESULTS := SELECT * FROM TABLE(V_FINAL_RESULTS) ORDER BY PERCENTAGE DESC, PRIORITY ASC;
-		--V_FINAL_RESULTS := MULTISET(SELECT * FROM TABLE(V_FINAL_RESULTS) ORDER BY PERCENTAGE DESC, PRIORITY ASC);
 	
 		CLOSE CANDIDATES_CURSOR;
 		RETURN V_FINAL_RESULTS;
@@ -460,199 +455,31 @@ CREATE OR REPLACE PACKAGE BODY SELECTION_PROCESS_PACKAGE AS
 	--Procedure to execute selection process and store data in SELECTIONS table
 	PROCEDURE StoreSelectionProcessData(p_is_automatized NUMBER) IS
 		V_FINAL_RESULTS SelectionsTableType;
-		--V_FINAL_RESULTS_SORTED SelectionsTableType;
 	
 	BEGIN
 		V_FINAL_RESULTS := ExecuteSelectionProcessPercentages(p_is_automatized);
-		--V_FINAL_RESULTS_SORTED := SortSelectionResults(V_FINAL_RESULTS);
 		
+		--I do not use the APPEND hint because it is counterproductive, since it does not look for available spaces but rather makes the table larger all the time
 		FOR i IN 1..V_FINAL_RESULTS.COUNT LOOP
 			INSERT INTO SELECTIONS (ID_SELECTION, ID_CANDIDATE, ID_SELECTION_PROCESS, PERCENTAGE, PRIORITY)
 			VALUES (V_FINAL_RESULTS(i).ID_SELECTION, V_FINAL_RESULTS(i).ID_CANDIDATE, V_FINAL_RESULTS(i).ID_SELECTION_PROCESS, 
 					V_FINAL_RESULTS(i).PERCENTAGE, V_FINAL_RESULTS(i).PRIORITY);
 		END LOOP;
-		
-		--Delete records used in the selection process	
-		--DELETE FROM CRITERIA_CONFIGURATION cc 
-		--WHERE cc.AUTOMATIZED = p_is_automatized;
-		--COMMIT;
 	
 	END StoreSelectionProcessData;
-
-	--NOT IN USE!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!
-	--Function to sort selection process results
-	FUNCTION SortSelectionResults (p_results SelectionsTableType) RETURN SelectionsTableType IS
-	
-		V_FINAL_RESULTS_SORTED SelectionsTableType;
-	
-	BEGIN
-	
-		V_FINAL_RESULTS_SORTED := p_results;
-		
-		FOR i IN 1..V_FINAL_RESULTS_SORTED.COUNT - 1 LOOP
-	        FOR j IN 1..V_FINAL_RESULTS_SORTED.COUNT - i LOOP
-	            IF V_FINAL_RESULTS_SORTED(j).PERCENTAGE < V_FINAL_RESULTS_SORTED(j + 1).PERCENTAGE OR
-	               (V_FINAL_RESULTS_SORTED(j).PERCENTAGE = V_FINAL_RESULTS_SORTED(j + 1).PERCENTAGE AND
-	                V_FINAL_RESULTS_SORTED(j).PRIORITY > V_FINAL_RESULTS_SORTED(j + 1).PRIORITY) THEN
-	                -- Intercambiar elementos si están en el orden incorrecto
-	                DECLARE
-	                    TEMP SELECTIONS_RECORD;
-	                BEGIN
-	                    TEMP := V_FINAL_RESULTS_SORTED(j);
-	                    V_FINAL_RESULTS_SORTED(j) := V_FINAL_RESULTS_SORTED(j + 1);
-	                    V_FINAL_RESULTS_SORTED(j + 1) := TEMP;
-	                END;
-	            END IF;
-	        END LOOP;
-	    END LOOP;
-		RETURN V_FINAL_RESULTS_SORTED;
-	END SortSelectionResults;
-	
 
 END SELECTION_PROCESS_PACKAGE;--FIN DEL PAQUETE
 
 
 --Ejecicion del proceso completo
-DECLARE
-	p_is_automatized NUMBER := 0;
-BEGIN
-	SELECTION_PROCESS_PACKAGE.StoreSelectionProcessData(p_is_automatized);
-END;
-
---Prueba GetCriteriaData
-DECLARE
-    p_is_automatized NUMBER := 0;
-    V_CRITERIA_ID VARCHAR2(10);
-	V_CRITERIA_VALUE VARCHAR2(100);
-    CRITERIA_CURSOR SYS_REFCURSOR;
-BEGIN
-    -- Llamada a la función y asignación del cursor
-	CRITERIA_CURSOR := SELECTION_PROCESS_PACKAGE.GetCriteriaData(p_is_automatized);
-    LOOP 
-		FETCH CRITERIA_CURSOR INTO V_CRITERIA_ID,V_CRITERIA_VALUE;
-		EXIT WHEN CRITERIA_CURSOR%NOTFOUND;
-        -- Imprimir los valores
-        DBMS_OUTPUT.PUT_LINE('ID_CRITERION: ' || V_CRITERIA_ID || ', VALUE/SCHEDULED_VALUE: ' || V_CRITERIA_VALUE);
-    END LOOP;
-
-    -- Cerrar el cursor
-    CLOSE CRITERIA_CURSOR;
-END;
-
---Prueba de GetConfigurationData
---CC.ID_CRITERION, CC.VALUE, CC.PRIORITY, CC.PERCENTAGE, CC.COMPARATOR
-DECLARE
-    p_is_automatized NUMBER := 0;
-   	p_id_criterion VARCHAR2(10);
-    V_CONF_ID VARCHAR2(10);
-   	V_CONF_VALUE VARCHAR2(50);
-   	V_CONF_PRIORITY NUMBER;
-   	V_CONF_PERCENTAGE NUMBER;
-   	V_CONF_COMPARATOR VARCHAR2(30);
-    CONF_CURSOR SYS_REFCURSOR;
-BEGIN
-	p_id_criterion := '1';
-    -- Llamada a la función y asignación del cursor
-	CONF_CURSOR := SELECTION_PROCESS_PACKAGE.GetCriteriaConfigurationData(p_id_criterion, p_is_automatized);
-    LOOP 
-		FETCH CONF_CURSOR INTO V_CONF_ID,V_CONF_VALUE,V_CONF_PRIORITY,V_CONF_PERCENTAGE,V_CONF_COMPARATOR;
-		EXIT WHEN CONF_CURSOR%NOTFOUND;
-        -- Imprimir los valores
-        DBMS_OUTPUT.PUT_LINE(V_CONF_ID || ',' || V_CONF_VALUE || ',' || V_CONF_PRIORITY || ',' || V_CONF_PERCENTAGE || ',' || V_CONF_COMPARATOR);
-       
-       	IF (V_CONF_VALUE IS NULL) THEN
-       	DBMS_OUTPUT.PUT_LINE('Es null');
-       	END IF;
-       
-    END LOOP;
-
-    -- Cerrar el cursor
-    CLOSE CONF_CURSOR;
-END;
-
---Prueba de GetPriorizationData
---CC.ID_CRITERION, CC.VALUE, CC.PRIORITY, CC.PERCENTAGE, CC.COMPARATOR
-DECLARE
-    p_is_automatized NUMBER := 0;
-   	p_id_criterion VARCHAR2(10);
-    V_CONF_ID VARCHAR2(10);
-   	V_CONF_VALUE VARCHAR2(50);
-   	V_CONF_PRIORITY NUMBER;
-   	V_CONF_PERCENTAGE NUMBER;
-   	V_CONF_COMPARATOR VARCHAR2(30);
-    CONF_CURSOR SYS_REFCURSOR;
-BEGIN
-	p_id_criterion := '8';
-    -- Llamada a la función y asignación del cursor
-	CONF_CURSOR := SELECTION_PROCESS_PACKAGE.GetPriorizationData(p_id_criterion, p_is_automatized);
-    LOOP 
-		FETCH CONF_CURSOR INTO V_CONF_ID,V_CONF_VALUE,V_CONF_PRIORITY,V_CONF_PERCENTAGE,V_CONF_COMPARATOR;
-		EXIT WHEN CONF_CURSOR%NOTFOUND;
-        -- Imprimir los valores
-        DBMS_OUTPUT.PUT_LINE(V_CONF_ID || ',' || V_CONF_VALUE || ',' || V_CONF_PRIORITY || ',' || V_CONF_PERCENTAGE || ',' || V_CONF_COMPARATOR);
-       
-       	IF (V_CONF_VALUE IS NULL) THEN
-       	DBMS_OUTPUT.PUT_LINE('Es null');
-       	END IF;
-       
-    END LOOP;
-
-    -- Cerrar el cursor
-    CLOSE CONF_CURSOR;
-END;
-
---Prueba de GetCandidatesData con solo 1 fila
-DECLARE
-	V_CANDIDATE_ID VARCHAR2(11);
-	V_CANDIDATE_SEX VARCHAR2(15);
-    V_CANDIDATE_CITY VARCHAR2(50);
-    V_CANDIDATE_ESTATE VARCHAR2(50);
-    V_CANDIDATE_AGE NUMBER;
-    V_CANDIDATE_ICFES NUMBER;
-   	V_ID_HEADQUARTERS_CAREER NUMBER;
-   	V_ID_EDUCATION NUMBER;
-   
-   	p_id_criterion VARCHAR2(10);
-   
-   	V_HEADQUARTER VARCHAR2(50);
-	V_CAREER VARCHAR2(50);
-	V_EDUCATION VARCHAR2(50);
-
-	V_LIST VARCHAR2(1000);
-   
-   CANDIDATES_CURSOR SYS_REFCURSOR;
-BEGIN
-	CANDIDATES_CURSOR := SELECTION_PROCESS_PACKAGE.GetCandidatesData();
-		
-	LOOP
-		FETCH CANDIDATES_CURSOR INTO V_CANDIDATE_ID,V_CANDIDATE_SEX,V_CANDIDATE_CITY,V_CANDIDATE_ESTATE,V_CANDIDATE_AGE,V_CANDIDATE_ICFES, V_ID_HEADQUARTERS_CAREER, V_ID_EDUCATION;
-		EXIT WHEN CANDIDATES_CURSOR%NOTFOUND;
-	
-		DBMS_OUTPUT.PUT_LINE(V_CANDIDATE_ID || ',' || V_CANDIDATE_SEX || ',' || V_CANDIDATE_CITY || ',' || V_CANDIDATE_ESTATE || ',' || V_CANDIDATE_AGE || ',' || V_CANDIDATE_ICFES || ',' || V_ID_HEADQUARTERS_CAREER || ',' || V_ID_EDUCATION);
-	
-		V_HEADQUARTER := SELECTION_PROCESS_PACKAGE.GetHeadquarter(V_ID_HEADQUARTERS_CAREER);
-		DBMS_OUTPUT.PUT_LINE(V_HEADQUARTER);
-	
-		V_CAREER := SELECTION_PROCESS_PACKAGE.GetCareerData(V_ID_HEADQUARTERS_CAREER);
-		DBMS_OUTPUT.PUT_LINE(V_CAREER);
-	
-		V_EDUCATION := SELECTION_PROCESS_PACKAGE.GetEducationTypeData(V_ID_EDUCATION);
-		DBMS_OUTPUT.PUT_LINE(V_EDUCATION);
-	
-		p_id_criterion := '2';
-	
-		V_LIST := SELECTION_PROCESS_PACKAGE.GetValueInList(p_id_criterion);
-		DBMS_OUTPUT.PUT_LINE('Lista:' || V_LIST);
-	
-		IF (V_LIST IS NULL) THEN
-			DBMS_OUTPUT.PUT_LINE('V_LIST ES NULL');
-		END IF;
-	
-	END LOOP;
-END;
+--DECLARE
+--	p_is_automatized NUMBER := 0;
+--BEGIN
+--	SELECTION_PROCESS_PACKAGE.StoreSelectionProcessData(p_is_automatized);
+--END;
 
 
 --Borrado
-DROP PACKAGE SELECTION_PROCESS_PACKAGE;
-DROP PACKAGE BODY SELECTION_PROCESS_PACKAGE;
+--DROP PACKAGE SELECTION_PROCESS_PACKAGE;
+--DROP PACKAGE BODY SELECTION_PROCESS_PACKAGE;
 
